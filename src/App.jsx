@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "react-hot-toast";
 import { AuthProvider, useAuth } from "./context/Authcontext.jsx";
 import { ThemeProvider } from "./context/ThemeContext";
-import { SocketProvider } from "./context/SocketContext";
+import { SocketProvider } from "./context/Socketcontext";
 
 import Layout from "./components/layout/Layout";
 import Login from "./pages/Login";
