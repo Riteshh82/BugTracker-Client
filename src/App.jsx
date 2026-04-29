@@ -8,7 +8,7 @@ import Layout from "./components/layout/Layout";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
-// import Projects from "./pages/Projects";
+import Projects from "./pages/Projects";
 import ProjectDetail from "./pages/ProjectDetail";
 import BugTable from "./pages/BugTable";
 import KanbanBoard from "./pages/KanbanBoard";
@@ -66,7 +66,7 @@ function AppRoutes() {
       >
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
-        {/* <Route path="projects" element={<Projects />} /> */}
+        <Route path="projects" element={<Projects />} />
         <Route path="projects/:id" element={<ProjectDetail />} />
         <Route path="projects/:id/bugs" element={<BugTable />} />
         <Route path="projects/:id/kanban" element={<KanbanBoard />} />
