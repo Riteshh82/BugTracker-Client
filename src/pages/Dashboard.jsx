@@ -172,27 +172,27 @@ export default function Dashboard() {
         <StatCard
           label="Total Bugs"
           value={stats?.totalBugs}
-          icon="🐛"
+          icon=""
           color="text-notion-text"
         />
         <StatCard
           label="Open"
           value={stats?.openBugs}
-          icon="🔴"
+          icon=""
           color="text-red-400"
           sub="Needs attention"
         />
         <StatCard
           label="Resolved"
           value={stats?.resolvedBugs}
-          icon="✅"
+          icon=""
           color="text-emerald-400"
           sub="Closed this period"
         />
         <StatCard
           label="Reopened"
           value={stats?.reopenedBugs}
-          icon="🔁"
+          icon=""
           color="text-orange-400"
           sub="Watch these"
         />
@@ -201,13 +201,13 @@ export default function Dashboard() {
         <StatCard
           label="Assigned"
           value={stats?.assignedBugs}
-          icon="👤"
+          icon=""
           color="text-violet-400"
         />
         <StatCard
           label="Unassigned"
           value={stats?.unassignedBugs}
-          icon="📋"
+          icon=""
           color="text-yellow-400"
         />
       </div>
