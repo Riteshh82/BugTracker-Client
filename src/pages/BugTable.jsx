@@ -1,12 +1,12 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { getBugs, updateBug, getModules, getFeatures } from '../api';
 import { useFilters } from '../context/FilterContext';
 import FilterBar from '../components/FilterBar';
+import ImportBugsModal from '../components/ImportBugsModal';
 import { priorityClass, statusClass, typeClass, timeAgo } from '../utils/helpers';
 import toast from 'react-hot-toast';
-import { useState } from 'react';
 
 const PRIORITIES = ['Blocker', 'High', 'Medium', 'Low'];
 const STATUSES = ['Open', 'Assigned', 'In Progress', 'Resolved', 'Closed', 'Reopened'];
@@ -20,6 +20,7 @@ export default function BugTable() {
   const [modules, setModules] = useState([]);
   const [features, setFeatures] = useState([]);
   const [editingCell, setEditingCell] = useState(null);
+  const [showImport, setShowImport] = useState(false);
 
   // Seed project into filter when landing on this page
   useEffect(() => {
@@ -71,10 +72,19 @@ export default function BugTable() {
     <div className="max-w-7xl mx-auto space-y-5">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-notion-text">Bug Table</h1>
-        <button onClick={() => navigate(`/bugs/new?project=${projectId}`)} className="btn-primary btn-sm">
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-          Report Bug
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowImport(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 text-xs font-medium transition-all"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+            Import Excel
+          </button>
+          <button onClick={() => navigate(`/bugs/new?project=${projectId}`)} className="btn-primary btn-sm">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+            Report Bug
+          </button>
+        </div>
       </div>
 
       <FilterBar hideModule={false} modules={modules} features={features} bugCount={bugs.length} />
@@ -133,6 +143,12 @@ export default function BugTable() {
         </table>
       </div>
       <p className="text-[10px] text-notion-muted text-center">💡 Double-click Priority or Status to inline edit</p>
+
+      <ImportBugsModal
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        onImported={fetchBugs}
+      />
     </div>
   );
 }

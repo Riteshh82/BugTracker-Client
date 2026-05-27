@@ -54,3 +54,11 @@ export const getAnalytics = (params) =>
 export const getNotifications = () => api.get("/notifications");
 export const markAllRead = () => api.put("/notifications/read-all");
 export const markRead = (id) => api.put(`/notifications/${id}/read`);
+
+// Excel import / template
+export const downloadBugTemplate = () =>
+  api.get("/bugs/import/template", { responseType: "blob" });
+export const importBugsFromExcel = (formData) =>
+  api.post("/bugs/import", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
