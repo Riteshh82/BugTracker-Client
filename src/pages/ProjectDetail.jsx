@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getProject, getModules, createModule, getFeatures, createFeature, deleteModule, deleteFeature } from '../api';
+import { getProject, getModules, createModule, getFeatures, createFeature, deleteModule, deleteFeature, deleteProject } from '../api';
+import ConfirmModal from '../components/ConfirmModal';
 import toast from 'react-hot-toast';
 
 const Modal = ({ open, onClose, title, children }) => {
@@ -30,6 +31,12 @@ export default function ProjectDetail() {
   const [showFeatureModal, setShowFeatureModal] = useState(null);
   const [form, setForm] = useState({ name: '', description: '' });
   const [saving, setSaving] = useState(false);
+
+  // Confirm modals state
+  const [confirmProject, setConfirmProject] = useState(false);
+  const [confirmModule, setConfirmModule] = useState(null); // module object
+  const [confirmFeature, setConfirmFeature] = useState(null); // { moduleId, feature }
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     getProject(id).then(r => setProject(r.data.project)).catch(() => toast.error('Project not found'));
@@ -74,6 +81,46 @@ export default function ProjectDetail() {
     setSaving(false);
   };
 
+  // Delete handlers
+  const handleDeleteProject = async () => {
+    setDeleting(true);
+    try {
+      await deleteProject(id);
+      toast.success('Project deleted');
+      navigate('/projects');
+    } catch { toast.error('Failed to delete project'); }
+    setDeleting(false);
+    setConfirmProject(false);
+  };
+
+  const handleDeleteModule = async () => {
+    if (!confirmModule) return;
+    setDeleting(true);
+    try {
+      await deleteModule(id, confirmModule._id);
+      setModules(prev => prev.filter(m => m._id !== confirmModule._id));
+      if (expandedModule === confirmModule._id) setExpandedModule(null);
+      toast.success('Module and all contents deleted');
+    } catch { toast.error('Failed to delete module'); }
+    setDeleting(false);
+    setConfirmModule(null);
+  };
+
+  const handleDeleteFeature = async () => {
+    if (!confirmFeature) return;
+    setDeleting(true);
+    try {
+      await deleteFeature(confirmFeature.moduleId, confirmFeature.feature._id);
+      setFeatures(prev => ({
+        ...prev,
+        [confirmFeature.moduleId]: (prev[confirmFeature.moduleId] || []).filter(f => f._id !== confirmFeature.feature._id)
+      }));
+      toast.success('Feature and all bugs deleted');
+    } catch { toast.error('Failed to delete feature'); }
+    setDeleting(false);
+    setConfirmFeature(null);
+  };
+
   if (!project) return <div className="flex items-center justify-center h-64"><div className="w-6 h-6 border-2 border-notion-accent border-t-transparent rounded-full animate-spin" /></div>;
 
   return (
@@ -90,14 +137,12 @@ export default function ProjectDetail() {
           <p className="text-notion-muted text-sm mt-1">{project.description || 'No description'}</p>
           <div className="flex items-center gap-2 mt-3">
             {project.members?.map(m => (
-              <div key={m._id} title={m.name} className="w-7 h-7 rounded-full bg-notion-accent/30 flex items-center justify-center text-notion-accent text-xs font-bold">
-                {m.name?.[0]}
-              </div>
+              <div key={m._id} title={m.name} className="w-7 h-7 rounded-full bg-notion-accent/30 flex items-center justify-center text-notion-accent text-xs font-bold">{m.name?.[0]}</div>
             ))}
             <span className="text-xs text-notion-muted">{project.members?.length || 0} member{project.members?.length !== 1 ? 's' : ''}</span>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap justify-end">
           <button onClick={() => navigate(`/projects/${id}/bugs`)} className="btn-secondary">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18M10 6h4M10 18h4" /></svg>
             Table View
@@ -109,6 +154,10 @@ export default function ProjectDetail() {
           <button onClick={() => navigate(`/bugs/new?project=${id}`)} className="btn-primary">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
             Report Bug
+          </button>
+          <button onClick={() => setConfirmProject(true)} className="btn-sm px-3 py-1.5 rounded-lg text-xs text-red-400 border border-red-400/30 hover:bg-red-400/10 transition-all">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+            Delete Project
           </button>
         </div>
       </div>
@@ -132,27 +181,61 @@ export default function ProjectDetail() {
           <div className="space-y-2">
             {modules.map(mod => (
               <div key={mod._id} className="border border-notion-border rounded-xl overflow-hidden">
-                <button
-                  onClick={() => handleExpandModule(mod._id)}
-                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-notion-hover transition-colors text-left"
-                >
-                  <svg className={`w-4 h-4 text-notion-muted transition-transform ${expandedModule === mod._id ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                  <div className="w-6 h-6 rounded bg-notion-accent/20 flex items-center justify-center text-notion-accent text-xs font-bold">{mod.name[0]}</div>
-                  <span className="text-sm font-medium text-notion-text">{mod.name}</span>
-                  <span className="ml-auto text-xs text-notion-muted">{mod.description}</span>
-                </button>
+                <div className="w-full flex items-center gap-3 px-4 py-3 hover:bg-notion-hover transition-colors">
+                  <button onClick={() => handleExpandModule(mod._id)} className="flex items-center gap-3 flex-1 text-left">
+                    <svg className={`w-4 h-4 text-notion-muted transition-transform ${expandedModule === mod._id ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                    <div className="w-6 h-6 rounded bg-notion-accent/20 flex items-center justify-center text-notion-accent text-xs font-bold">{mod.name[0]}</div>
+                    <span className="text-sm font-medium text-notion-text">{mod.name}</span>
+                    <span className="text-xs text-notion-muted">{mod.description}</span>
+                  </button>
+                  <div className="flex items-center gap-1 ml-auto">
+                    <button
+                      onClick={() => navigate(`/bugs/new?project=${id}&module=${mod._id}`)}
+                      title="Add bug to this module"
+                      className="btn-ghost btn-sm text-notion-muted hover:text-notion-accent px-2"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                    </button>
+                    <button
+                      onClick={() => setConfirmModule(mod)}
+                      title="Delete module"
+                      className="btn-ghost btn-sm text-red-400/60 hover:text-red-400 px-2"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>
+                  </div>
+                </div>
 
                 <AnimatePresence>
                   {expandedModule === mod._id && (
                     <motion.div initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }} className="overflow-hidden border-t border-notion-border">
                       <div className="bg-notion-bg/30 p-3 space-y-1.5">
                         {(features[mod._id] || []).map(feat => (
-                          <div key={feat._id} className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-notion-hover text-sm text-notion-muted">
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z" /></svg>
-                            {feat.name}
+                          <div key={feat._id} className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-notion-hover text-sm text-notion-muted group">
+                            <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z" /></svg>
+                            <span className="flex-1">{feat.name}</span>
+                            <div className="hidden group-hover:flex items-center gap-1">
+                              <button
+                                onClick={() => navigate(`/bugs/new?project=${id}&module=${mod._id}&feature=${feat._id}`)}
+                                title="Add bug to this feature"
+                                className="p-1 rounded text-notion-muted hover:text-notion-accent transition-colors"
+                              >
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                              </button>
+                              <button
+                                onClick={() => setConfirmFeature({ moduleId: mod._id, feature: feat })}
+                                title="Delete feature"
+                                className="p-1 rounded text-red-400/50 hover:text-red-400 transition-colors"
+                              >
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                              </button>
+                            </div>
                           </div>
                         ))}
-                        <button onClick={() => { setShowFeatureModal(mod._id); setForm({ name: '', description: '' }); }} className="btn-ghost btn-sm w-full justify-start text-notion-muted">
+                        <button
+                          onClick={() => { setShowFeatureModal(mod._id); setForm({ name: '', description: '' }); }}
+                          className="btn-ghost btn-sm w-full justify-start text-notion-muted"
+                        >
                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
                           Add Feature
                         </button>
@@ -183,6 +266,39 @@ export default function ProjectDetail() {
           <div className="flex gap-3 justify-end"><button type="button" onClick={() => setShowFeatureModal(null)} className="btn-secondary">Cancel</button><button type="submit" disabled={saving} className="btn-primary">{saving ? 'Saving...' : 'Create'}</button></div>
         </form>
       </Modal>
+
+      {/* Confirm Delete Project */}
+      <ConfirmModal
+        open={confirmProject}
+        onClose={() => setConfirmProject(false)}
+        onConfirm={handleDeleteProject}
+        loading={deleting}
+        title="Delete Project"
+        message={`Are you sure you want to delete "${project.name}"? This will permanently delete all modules, features, and bugs inside it.`}
+        confirmLabel="Delete Project"
+      />
+
+      {/* Confirm Delete Module */}
+      <ConfirmModal
+        open={!!confirmModule}
+        onClose={() => setConfirmModule(null)}
+        onConfirm={handleDeleteModule}
+        loading={deleting}
+        title="Delete Module"
+        message={`Delete "${confirmModule?.name}"? All features and bugs inside this module will also be deleted.`}
+        confirmLabel="Delete Module"
+      />
+
+      {/* Confirm Delete Feature */}
+      <ConfirmModal
+        open={!!confirmFeature}
+        onClose={() => setConfirmFeature(null)}
+        onConfirm={handleDeleteFeature}
+        loading={deleting}
+        title="Delete Feature"
+        message={`Delete "${confirmFeature?.feature?.name}"? All bugs inside this feature will also be deleted.`}
+        confirmLabel="Delete Feature"
+      />
     </div>
   );
 }

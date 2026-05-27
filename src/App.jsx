@@ -3,6 +3,7 @@ import { Toaster } from "react-hot-toast";
 import { AuthProvider, useAuth } from "./context/Authcontext.jsx";
 import { ThemeProvider } from "./context/ThemeContext";
 import { SocketProvider } from "./context/Socketcontext";
+import { FilterProvider } from "./context/FilterContext";
 
 import Layout from "./components/layout/Layout";
 import Login from "./pages/Login";
@@ -86,8 +87,9 @@ export default function App() {
       <ThemeProvider>
         <AuthProvider>
           <SocketProvider>
-            <AppRoutes />
-            <Toaster
+            <FilterProvider>
+              <AppRoutes />
+              <Toaster
               position="top-right"
               toastOptions={{
                 style: {
@@ -102,6 +104,7 @@ export default function App() {
                 },
               }}
             />
+            </FilterProvider>
           </SocketProvider>
         </AuthProvider>
       </ThemeProvider>

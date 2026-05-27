@@ -1,9 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { getBugs, updateBug } from '../api';
+import { getBugs, updateBug, getModules, getFeatures } from '../api';
+import { useFilters } from '../context/FilterContext';
+import FilterBar from '../components/FilterBar';
 import { priorityClass, statusClass, typeClass, timeAgo } from '../utils/helpers';
 import toast from 'react-hot-toast';
+import { useState } from 'react';
 
 const PRIORITIES = ['Blocker', 'High', 'Medium', 'Low'];
 const STATUSES = ['Open', 'Assigned', 'In Progress', 'Resolved', 'Closed', 'Reopened'];
@@ -11,34 +14,39 @@ const STATUSES = ['Open', 'Assigned', 'In Progress', 'Resolved', 'Closed', 'Reop
 export default function BugTable() {
   const { id: projectId } = useParams();
   const navigate = useNavigate();
+  const { filters, setFilter, setMany, toQueryParams } = useFilters();
   const [bugs, setBugs] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({ priority: '', status: '', search: '' });
-  const [sortKey, setSortKey] = useState('createdAt');
-  const [sortDir, setSortDir] = useState('desc');
-  const [editingCell, setEditingCell] = useState(null); // { bugId, field }
+  const [modules, setModules] = useState([]);
+  const [features, setFeatures] = useState([]);
+  const [editingCell, setEditingCell] = useState(null);
 
-  const fetchBugs = () => {
+  // Seed project into filter when landing on this page
+  useEffect(() => {
+    setMany({ project: projectId });
+  }, [projectId]);
+
+  // Load modules for filter bar
+  useEffect(() => {
+    getModules(projectId).then(r => setModules(r.data.modules)).catch(() => {});
+  }, [projectId]);
+
+  // Load features when module filter changes
+  useEffect(() => {
+    if (!filters.module) { setFeatures([]); return; }
+    getFeatures(filters.module).then(r => setFeatures(r.data.features)).catch(() => {});
+  }, [filters.module]);
+
+  const fetchBugs = useCallback(() => {
     setLoading(true);
-    getBugs({ project: projectId, ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v)) })
+    const params = toQueryParams({ project: projectId });
+    getBugs(params)
       .then(r => setBugs(r.data.bugs))
       .catch(() => toast.error('Failed to load bugs'))
       .finally(() => setLoading(false));
-  };
+  }, [filters, projectId]);
 
-  useEffect(() => { fetchBugs(); }, [projectId, filters]);
-
-  const handleSort = (key) => {
-    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    else { setSortKey(key); setSortDir('asc'); }
-  };
-
-  const sorted = [...bugs].sort((a, b) => {
-    const av = a[sortKey], bv = b[sortKey];
-    if (!av && !bv) return 0;
-    const cmp = String(av).localeCompare(String(bv));
-    return sortDir === 'asc' ? cmp : -cmp;
-  });
+  useEffect(() => { fetchBugs(); }, [fetchBugs]);
 
   const handleInlineEdit = async (bugId, field, value) => {
     try {
@@ -49,10 +57,15 @@ export default function BugTable() {
   };
 
   const SortIcon = ({ col }) => (
-    <svg className={`w-3 h-3 inline ml-1 transition-transform ${sortKey === col && sortDir === 'desc' ? 'rotate-180' : ''} ${sortKey !== col ? 'opacity-30' : 'text-notion-accent'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={`w-3 h-3 inline ml-1 transition-transform ${filters.sortBy === col && filters.sortDir === 'desc' ? 'rotate-180' : ''} ${filters.sortBy !== col ? 'opacity-30' : 'text-notion-accent'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
     </svg>
   );
+
+  const handleSort = (key) => {
+    if (filters.sortBy === key) setFilter('sortDir', filters.sortDir === 'asc' ? 'desc' : 'asc');
+    else { setFilter('sortBy', key); setFilter('sortDir', 'asc'); }
+  };
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
@@ -64,35 +77,8 @@ export default function BugTable() {
         </button>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <div className="relative">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-notion-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0" /></svg>
-          <input
-            className="input input-sm pl-8 w-56"
-            placeholder="Search bugs..."
-            value={filters.search}
-            onChange={e => setFilters(p => ({ ...p, search: e.target.value }))}
-          />
-        </div>
-        <select className="input input-sm w-36" value={filters.priority} onChange={e => setFilters(p => ({ ...p, priority: e.target.value }))}>
-          <option value="">All Priorities</option>
-          {PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
-        </select>
-        <select className="input input-sm w-36" value={filters.status} onChange={e => setFilters(p => ({ ...p, status: e.target.value }))}>
-          <option value="">All Statuses</option>
-          {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-        {(filters.priority || filters.status || filters.search) && (
-          <button onClick={() => setFilters({ priority: '', status: '', search: '' })} className="btn-ghost btn-sm text-red-400">
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-            Clear
-          </button>
-        )}
-        <span className="ml-auto text-xs text-notion-muted self-center">{bugs.length} bug{bugs.length !== 1 ? 's' : ''}</span>
-      </div>
+      <FilterBar hideModule={false} modules={modules} features={features} bugCount={bugs.length} />
 
-      {/* Table */}
       <div className="card p-0 overflow-x-auto">
         <table className="w-full">
           <thead>
@@ -109,9 +95,9 @@ export default function BugTable() {
               Array(5).fill(0).map((_, i) => (
                 <tr key={i}><td colSpan={7} className="px-4 py-3"><div className="h-4 bg-notion-hover rounded animate-pulse" /></td></tr>
               ))
-            ) : sorted.length === 0 ? (
+            ) : bugs.length === 0 ? (
               <tr><td colSpan={7} className="text-center py-16 text-notion-muted">No bugs found</td></tr>
-            ) : sorted.map((bug, i) => (
+            ) : bugs.map((bug, i) => (
               <motion.tr key={bug._id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.02 }}
                 className="table-row" onClick={() => navigate(`/bugs/${bug._id}`)}>
                 <td className="px-4 py-3 text-xs font-mono text-notion-muted">{bug.bugId}</td>

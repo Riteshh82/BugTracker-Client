@@ -1,15 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
 import {
   DndContext, DragOverlay, closestCenter, useSensor, useSensors, PointerSensor
 } from '@dnd-kit/core';
-import {
-  SortableContext, verticalListSortingStrategy, useSortable
-} from '@dnd-kit/sortable';
+import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { getBugs, updateBug } from '../api';
-import { priorityClass, statusClass, timeAgo } from '../utils/helpers';
+import { getBugs, updateBug, getModules, getFeatures } from '../api';
+import { useFilters } from '../context/FilterContext';
+import FilterBar from '../components/FilterBar';
+import { statusClass, timeAgo } from '../utils/helpers';
 import toast from 'react-hot-toast';
 
 const COLUMNS = [
@@ -62,20 +61,37 @@ function SortableBugCard({ bug, navigate }) {
 export default function KanbanBoard() {
   const { id: projectId } = useParams();
   const navigate = useNavigate();
+  const { filters, setMany, toQueryParams } = useFilters();
   const [bugsByPriority, setBugsByPriority] = useState({ Blocker: [], High: [], Medium: [], Low: [] });
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState(null);
   const [activeBug, setActiveBug] = useState(null);
+  const [modules, setModules] = useState([]);
+  const [features, setFeatures] = useState([]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   useEffect(() => {
-    getBugs({ project: projectId, limit: 200 }).then(r => {
+    setMany({ project: projectId });
+    getModules(projectId).then(r => setModules(r.data.modules)).catch(() => {});
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!filters.module) { setFeatures([]); return; }
+    getFeatures(filters.module).then(r => setFeatures(r.data.features)).catch(() => {});
+  }, [filters.module]);
+
+  const fetchBugs = useCallback(() => {
+    setLoading(true);
+    const params = toQueryParams({ project: projectId, limit: 500 });
+    getBugs(params).then(r => {
       const grouped = { Blocker: [], High: [], Medium: [], Low: [] };
       r.data.bugs.forEach(bug => { if (grouped[bug.priority]) grouped[bug.priority].push(bug); });
       setBugsByPriority(grouped);
     }).catch(() => toast.error('Failed to load bugs')).finally(() => setLoading(false));
-  }, [projectId]);
+  }, [filters, projectId]);
+
+  useEffect(() => { fetchBugs(); }, [fetchBugs]);
 
   const findBug = (id) => {
     for (const col of COLUMNS) {
@@ -95,29 +111,20 @@ export default function KanbanBoard() {
     setActiveId(null);
     setActiveBug(null);
     if (!over) return;
-
     const fromResult = findBug(active.id);
     if (!fromResult) return;
-
-    // Check if dropped over a column header
-    const targetPriority = COLUMNS.find(c => c.key === over.id)?.key
-      || findBug(over.id)?.priority;
-
+    const targetPriority = COLUMNS.find(c => c.key === over.id)?.key || findBug(over.id)?.priority;
     if (!targetPriority || fromResult.priority === targetPriority) return;
-
-    // Optimistically update
     setBugsByPriority(prev => {
       const from = prev[fromResult.priority].filter(b => b._id !== active.id);
       const to = [...prev[targetPriority], { ...fromResult.bug, priority: targetPriority }];
       return { ...prev, [fromResult.priority]: from, [targetPriority]: to };
     });
-
     try {
       await updateBug(active.id, { priority: targetPriority });
       toast.success(`Moved to ${targetPriority}`);
     } catch {
       toast.error('Failed to update priority');
-      // revert
       setBugsByPriority(prev => {
         const to = prev[targetPriority].filter(b => b._id !== active.id);
         const from = [...prev[fromResult.priority], fromResult.bug];
@@ -126,11 +133,7 @@ export default function KanbanBoard() {
     }
   };
 
-  if (loading) return (
-    <div className="grid grid-cols-4 gap-4">
-      {COLUMNS.map(c => <div key={c.key} className="kanban-col h-64 animate-pulse" />)}
-    </div>
-  );
+  const totalBugs = COLUMNS.reduce((s, c) => s + bugsByPriority[c.key].length, 0);
 
   return (
     <div className="space-y-4">
@@ -142,38 +145,41 @@ export default function KanbanBoard() {
         </button>
       </div>
 
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 items-start">
-          {COLUMNS.map(col => (
-            <div key={col.key} id={col.key} className="kanban-col">
-              {/* Column header */}
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ background: col.dot }} />
-                  <span className="text-xs font-semibold text-notion-text">{col.label}</span>
-                </div>
-                <span className="text-xs bg-notion-border text-notion-muted px-2 py-0.5 rounded-full">
-                  {bugsByPriority[col.key].length}
-                </span>
-              </div>
+      <FilterBar hideModule={false} modules={modules} features={features} bugCount={totalBugs} />
 
-              <SortableContext items={bugsByPriority[col.key].map(b => b._id)} strategy={verticalListSortingStrategy}>
-                {bugsByPriority[col.key].length === 0 ? (
-                  <div className="text-center py-8 text-notion-muted text-xs border border-dashed border-notion-border rounded-lg">
-                    No bugs
-                  </div>
-                ) : bugsByPriority[col.key].map(bug => (
-                  <SortableBugCard key={bug._id} bug={bug} navigate={navigate} />
-                ))}
-              </SortableContext>
-            </div>
-          ))}
+      {loading ? (
+        <div className="grid grid-cols-4 gap-4">
+          {COLUMNS.map(c => <div key={c.key} className="kanban-col h-64 animate-pulse" />)}
         </div>
-
-        <DragOverlay>
-          {activeBug && <div className="w-64 rotate-2 opacity-90"><BugCard bug={activeBug} navigate={() => {}} isDragging={false} /></div>}
-        </DragOverlay>
-      </DndContext>
+      ) : (
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 items-start">
+            {COLUMNS.map(col => (
+              <div key={col.key} id={col.key} className="kanban-col">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full" style={{ background: col.dot }} />
+                    <span className="text-xs font-semibold text-notion-text">{col.label}</span>
+                  </div>
+                  <span className="text-xs bg-notion-border text-notion-muted px-2 py-0.5 rounded-full">
+                    {bugsByPriority[col.key].length}
+                  </span>
+                </div>
+                <SortableContext items={bugsByPriority[col.key].map(b => b._id)} strategy={verticalListSortingStrategy}>
+                  {bugsByPriority[col.key].length === 0 ? (
+                    <div className="text-center py-8 text-notion-muted text-xs border border-dashed border-notion-border rounded-lg">No bugs</div>
+                  ) : bugsByPriority[col.key].map(bug => (
+                    <SortableBugCard key={bug._id} bug={bug} navigate={navigate} />
+                  ))}
+                </SortableContext>
+              </div>
+            ))}
+          </div>
+          <DragOverlay>
+            {activeBug && <div className="w-64 rotate-2 opacity-90"><BugCard bug={activeBug} navigate={() => {}} isDragging={false} /></div>}
+          </DragOverlay>
+        </DndContext>
+      )}
     </div>
   );
 }
