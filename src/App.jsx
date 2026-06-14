@@ -15,6 +15,7 @@ import BugTable from "./pages/BugTable";
 import KanbanBoard from "./pages/KanbanBoard";
 import BugDetail from "./pages/BugDetail";
 import NewBug from "./pages/NewBug";
+import EditBug from "./pages/EditBug";
 import Profile from "./pages/Profile";
 import Trash from "./pages/Trash";
 
@@ -73,6 +74,7 @@ function AppRoutes() {
         <Route path="projects/:id/kanban" element={<KanbanBoard />} />
         <Route path="bugs/new" element={<NewBug />} />
         <Route path="bugs/:id" element={<BugDetail />} />
+        <Route path="bugs/:id/edit" element={<EditBug />} />
         <Route path="profile" element={<Profile />} />
         <Route path="trash" element={<Trash />} />
       </Route>

@@ -140,7 +140,7 @@ export default function Dashboard() {
         <StatCard
           label="Total Bugs"
           value={stats?.totalBugs}
-          icon="🐛"
+          icon=""
           color="text-notion-text"
         />
         <StatCard
@@ -169,7 +169,7 @@ export default function Dashboard() {
         <StatCard
           label="Assigned"
           value={stats?.assignedBugs}
-          icon="👤"
+          icon=""
           color="text-violet-400"
         />
         <StatCard

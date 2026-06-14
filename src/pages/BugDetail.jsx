@@ -1,14 +1,16 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   getBug,
   updateBug,
   deleteBug,
-  restoreBug,
   getComments,
   addComment,
   getBugActivity,
+  getModules,
+  getFeatures,
+  getUsers,
 } from "../api";
 import {
   priorityClass,
@@ -21,15 +23,10 @@ import {
 import toast from "react-hot-toast";
 import { useAuth } from "../context/Authcontext.jsx";
 
-const STATUSES = [
-  "Open",
-  "Assigned",
-  "In Progress",
-  "Resolved",
-  "Closed",
-  "Reopened",
-];
+const STATUSES = ["Open", "Assigned", "In Progress", "Resolved", "Closed", "Reopened"];
 const PRIORITIES = ["Blocker", "High", "Medium", "Low"];
+const TYPES = ["Bug", "Suggestion", "Improvement"];
+const PRIORITY_COLORS = { Blocker: "#ef4444", High: "#f97316", Medium: "#eab308", Low: "#22c55e" };
 
 const Avatar = ({ name, size = 7 }) => (
   <div
@@ -51,6 +48,14 @@ export default function BugDetail() {
   const [tab, setTab] = useState("comments");
   const [saving, setSaving] = useState(false);
 
+  // Edit mode state
+  const [editing, setEditing] = useState(false);
+  const [editForm, setEditForm] = useState({});
+  const [modules, setModules] = useState([]);
+  const [features, setFeatures] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [editSaving, setEditSaving] = useState(false);
+
   const fetchAll = async () => {
     try {
       const [bugRes, commentRes, activityRes] = await Promise.all([
@@ -67,9 +72,7 @@ export default function BugDetail() {
     }
   };
 
-  useEffect(() => {
-    fetchAll();
-  }, [id]);
+  useEffect(() => { fetchAll(); }, [id]);
 
   const handleUpdate = async (field, value) => {
     try {
@@ -102,6 +105,60 @@ export default function BugDetail() {
     navigate(-1);
   };
 
+  // Start editing — pre-fill form and load dropdown data
+  const startEdit = async () => {
+    setEditForm({
+      title: bug.title || "",
+      description: bug.description || "",
+      stepsToReproduce: bug.stepsToReproduce || "",
+      expectedResult: bug.expectedResult || "",
+      actualResult: bug.actualResult || "",
+      priority: bug.priority || "Medium",
+      type: bug.type || "Bug",
+      status: bug.status || "Open",
+      tags: bug.tags?.join(", ") || "",
+      module: bug.module?._id || "",
+      feature: bug.feature?._id || "",
+      assignedTo: bug.assignedTo?._id || "",
+    });
+    // Load contextual data
+    if (bug.project?._id) {
+      getModules(bug.project._id).then(r => setModules(r.data.modules)).catch(() => {});
+    }
+    if (bug.module?._id) {
+      getFeatures(bug.module._id).then(r => setFeatures(r.data.features)).catch(() => {});
+    }
+    getUsers().then(r => setUsers(r.data.users || [])).catch(() => {});
+    setEditing(true);
+  };
+
+  const handleModuleChange = async (e) => {
+    const moduleId = e.target.value;
+    setEditForm(p => ({ ...p, module: moduleId, feature: "" }));
+    if (!moduleId) { setFeatures([]); return; }
+    getFeatures(moduleId).then(r => setFeatures(r.data.features)).catch(() => setFeatures([]));
+  };
+
+  const handleSaveEdit = async () => {
+    setEditSaving(true);
+    try {
+      const payload = { ...editForm };
+      payload.tags = editForm.tags ? editForm.tags.split(",").map(t => t.trim()).filter(Boolean) : [];
+      if (!payload.module) delete payload.module;
+      if (!payload.feature) delete payload.feature;
+      if (!payload.assignedTo) payload.assignedTo = null;
+      const res = await updateBug(id, payload);
+      setBug(res.data.bug);
+      setEditing(false);
+      toast.success("Bug updated!");
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Update failed");
+    }
+    setEditSaving(false);
+  };
+
+  const setEdit = (field) => (e) => setEditForm(p => ({ ...p, [field]: e.target.value }));
+
   if (!bug)
     return (
       <div className="flex items-center justify-center h-64">
@@ -109,348 +166,327 @@ export default function BugDetail() {
       </div>
     );
 
+  const isReporter = user?._id === bug.createdBy?._id;
+
   return (
     <div className="max-w-5xl mx-auto">
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="space-y-6"
-      >
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
         {/* Header */}
         <div className="flex items-start gap-4">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-xs font-mono text-notion-muted bg-notion-hover px-2 py-0.5 rounded">
-                {bug.bugId}
-              </span>
+              <span className="text-xs font-mono text-notion-muted bg-notion-hover px-2 py-0.5 rounded">{bug.bugId}</span>
               <span className={typeClass(bug.type)}>{bug.type}</span>
-              <span className={priorityClass(bug.priority)}>
-                {bug.priority}
-              </span>
+              <span className={priorityClass(bug.priority)}>{bug.priority}</span>
               <span className={statusClass(bug.status)}>{bug.status}</span>
             </div>
             <h1 className="text-xl font-bold text-notion-text">{bug.title}</h1>
             <p className="text-xs text-notion-muted mt-1">
-              Reported by{" "}
-              <span className="text-notion-text">{bug.createdBy?.name}</span> ·{" "}
-              {timeAgo(bug.createdAt)}
+              Reported by <span className="text-notion-text">{bug.createdBy?.name}</span> · {timeAgo(bug.createdAt)}
             </p>
           </div>
-          <div className="flex gap-2">
-            <button onClick={handleDelete} className="btn-danger btn-sm">
-              <svg
-                className="w-3.5 h-3.5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                />
-              </svg>
-              Trash
-            </button>
+          <div className="flex gap-2 shrink-0">
+            {isReporter && !editing && (
+              <button onClick={startEdit} className="btn-secondary btn-sm">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+                Edit Bug
+              </button>
+            )}
+            {editing && (
+              <>
+                <button onClick={() => setEditing(false)} className="btn-secondary btn-sm">Discard</button>
+                <button onClick={handleSaveEdit} disabled={editSaving} className="btn-primary btn-sm">
+                  {editSaving
+                    ? <><span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />Saving...</>
+                    : <><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>Save Changes</>
+                  }
+                </button>
+              </>
+            )}
+            {!editing && (
+              <button onClick={handleDelete} className="btn-danger btn-sm">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                Trash
+              </button>
+            )}
           </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Main */}
+          {/* Main content */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Details */}
-            <div className="card space-y-4">
-              <h2 className="text-sm font-semibold text-notion-text">
-                Details
-              </h2>
-              {bug.description && (
-                <div>
-                  <label className="label">Description</label>
-                  <p className="text-sm text-notion-text/80 leading-relaxed whitespace-pre-wrap">
-                    {bug.description}
-                  </p>
-                </div>
+            <AnimatePresence mode="wait">
+              {editing ? (
+                /* ── EDIT MODE ── */
+                <motion.div key="edit" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="card space-y-4">
+                  <div className="flex items-center gap-2 pb-3 border-b border-notion-border">
+                    <div className="w-2 h-2 rounded-full bg-notion-accent animate-pulse" />
+                    <span className="text-xs font-semibold text-notion-accent">Editing</span>
+                  </div>
+                  <div>
+                    <label className="label">Title *</label>
+                    <input className="input" value={editForm.title} onChange={setEdit("title")} required />
+                  </div>
+                  <div>
+                    <label className="label">Description</label>
+                    <textarea className="input resize-none" rows={3} value={editForm.description} onChange={setEdit("description")} placeholder="Describe the bug..." />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="label">Steps to Reproduce</label>
+                      <textarea className="input resize-none" rows={4} value={editForm.stepsToReproduce} onChange={setEdit("stepsToReproduce")} placeholder={"1. Go to...\n2. Click...\n3. See error"} />
+                    </div>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="label">Expected Result</label>
+                        <textarea className="input resize-none" rows={1} value={editForm.expectedResult} onChange={setEdit("expectedResult")} />
+                      </div>
+                      <div>
+                        <label className="label">Actual Result</label>
+                        <textarea className="input resize-none" rows={1} value={editForm.actualResult} onChange={setEdit("actualResult")} />
+                      </div>
+                      <div>
+                        <label className="label">Tags (comma-separated)</label>
+                        <input className="input" value={editForm.tags} onChange={setEdit("tags")} placeholder="ui, critical, auth" />
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              ) : (
+                /* ── VIEW MODE ── */
+                <motion.div key="view" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="card space-y-4">
+                  <h2 className="text-sm font-semibold text-notion-text">Details</h2>
+                  {bug.description && (
+                    <div>
+                      <label className="label">Description</label>
+                      <p className="text-sm text-notion-text/80 leading-relaxed whitespace-pre-wrap">{bug.description}</p>
+                    </div>
+                  )}
+                  {bug.stepsToReproduce && (
+                    <div>
+                      <label className="label">Steps to Reproduce</label>
+                      <p className="text-sm text-notion-text/80 whitespace-pre-wrap leading-relaxed">{bug.stepsToReproduce}</p>
+                    </div>
+                  )}
+                  {bug.expectedResult && (
+                    <div>
+                      <label className="label">Expected Result</label>
+                      <p className="text-sm text-notion-text/80">{bug.expectedResult}</p>
+                    </div>
+                  )}
+                  {bug.actualResult && (
+                    <div>
+                      <label className="label">Actual Result</label>
+                      <p className="text-sm text-notion-text/80">{bug.actualResult}</p>
+                    </div>
+                  )}
+                  {!bug.description && !bug.stepsToReproduce && !bug.expectedResult && !bug.actualResult && (
+                    <p className="text-xs text-notion-muted italic">No details added yet.{isReporter && " Click \"Edit Bug\" to add them."}</p>
+                  )}
+                </motion.div>
               )}
-              {bug.stepsToReproduce && (
-                <div>
-                  <label className="label">Steps to Reproduce</label>
-                  <p className="text-sm text-notion-text/80 whitespace-pre-wrap leading-relaxed">
-                    {bug.stepsToReproduce}
-                  </p>
-                </div>
-              )}
-              {bug.expectedResult && (
-                <div>
-                  <label className="label">Expected Result</label>
-                  <p className="text-sm text-notion-text/80">
-                    {bug.expectedResult}
-                  </p>
-                </div>
-              )}
-              {bug.actualResult && (
-                <div>
-                  <label className="label">Actual Result</label>
-                  <p className="text-sm text-notion-text/80">
-                    {bug.actualResult}
-                  </p>
-                </div>
-              )}
-            </div>
+            </AnimatePresence>
 
             {/* Screenshots */}
             {bug.screenshots?.length > 0 && (
               <div className="card">
-                <h2 className="text-sm font-semibold text-notion-text mb-3">
-                  Screenshots
-                </h2>
+                <h2 className="text-sm font-semibold text-notion-text mb-3">Screenshots</h2>
                 <div className="flex flex-wrap gap-3">
                   {bug.screenshots.map((s, i) => (
                     <a key={i} href={s.url} target="_blank" rel="noreferrer">
-                      <img
-                        src={s.url}
-                        alt={s.filename}
-                        className="w-32 h-24 object-cover rounded-lg border border-notion-border hover:border-notion-accent transition-colors"
-                      />
+                      <img src={s.url} alt={s.filename} className="w-32 h-24 object-cover rounded-lg border border-notion-border hover:border-notion-accent transition-colors" />
                     </a>
                   ))}
                 </div>
               </div>
             )}
 
-            {/* Comments / Activity tabs */}
-            <div className="card">
-              <div className="flex gap-4 border-b border-notion-border mb-4 -mx-5 px-5">
-                {["comments", "activity", "history"].map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => setTab(t)}
-                    className={`pb-3 text-xs font-medium capitalize transition-colors border-b-2 -mb-px ${
-                      tab === t
-                        ? "text-notion-accent border-notion-accent"
-                        : "text-notion-muted border-transparent hover:text-notion-text"
-                    }`}
-                  >
-                    {t}{" "}
-                    {t === "comments"
-                      ? `(${comments.length})`
-                      : t === "activity"
-                      ? `(${activity.length})`
-                      : ""}
-                  </button>
-                ))}
-              </div>
+            {/* Comments / Activity / History tabs */}
+            {!editing && (
+              <div className="card">
+                <div className="flex gap-4 border-b border-notion-border mb-4 -mx-5 px-5">
+                  {["comments", "activity", "history"].map((t) => (
+                    <button key={t} onClick={() => setTab(t)}
+                      className={`pb-3 text-xs font-medium capitalize transition-colors border-b-2 -mb-px ${tab === t ? "text-notion-accent border-notion-accent" : "text-notion-muted border-transparent hover:text-notion-text"}`}>
+                      {t} {t === "comments" ? `(${comments.length})` : t === "activity" ? `(${activity.length})` : ""}
+                    </button>
+                  ))}
+                </div>
 
-              {tab === "comments" && (
-                <div className="space-y-4">
-                  {comments.length === 0 && (
-                    <p className="text-xs text-notion-muted text-center py-4">
-                      No comments yet
-                    </p>
-                  )}
-                  {comments.map((c) => (
-                    <div key={c._id} className="flex gap-3">
-                      <Avatar name={c.author?.name} />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-xs font-semibold text-notion-text">
-                            {c.author?.name}
-                          </span>
-                          <span className="text-[10px] text-notion-muted">
-                            {timeAgo(c.createdAt)}
-                          </span>
-                          {c.isEdited && (
-                            <span className="text-[10px] text-notion-muted italic">
-                              (edited)
-                            </span>
-                          )}
+                {tab === "comments" && (
+                  <div className="space-y-4">
+                    {comments.length === 0 && <p className="text-xs text-notion-muted text-center py-4">No comments yet</p>}
+                    {comments.map((c) => (
+                      <div key={c._id} className="flex gap-3">
+                        <Avatar name={c.author?.name} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs font-semibold text-notion-text">{c.author?.name}</span>
+                            <span className="text-[10px] text-notion-muted">{timeAgo(c.createdAt)}</span>
+                            {c.isEdited && <span className="text-[10px] text-notion-muted italic">(edited)</span>}
+                          </div>
+                          <p className="text-sm text-notion-text/80 leading-relaxed">{c.content}</p>
                         </div>
-                        <p className="text-sm text-notion-text/80 leading-relaxed">
-                          {c.content}
-                        </p>
                       </div>
-                    </div>
-                  ))}
-                  <form
-                    onSubmit={handleAddComment}
-                    className="flex gap-3 pt-2 border-t border-notion-border"
-                  >
-                    <Avatar name={user?.name} />
-                    <div className="flex-1 flex gap-2">
-                      <input
-                        value={comment}
-                        onChange={(e) => setComment(e.target.value)}
-                        placeholder="Add a comment..."
-                        className="input flex-1"
-                      />
-                      <button
-                        type="submit"
-                        disabled={saving || !comment.trim()}
-                        className="btn-primary btn-sm"
-                      >
-                        Post
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              )}
+                    ))}
+                    <form onSubmit={handleAddComment} className="flex gap-3 pt-2 border-t border-notion-border">
+                      <Avatar name={user?.name} />
+                      <div className="flex-1 flex gap-2">
+                        <input value={comment} onChange={e => setComment(e.target.value)} placeholder="Add a comment..." className="input flex-1" />
+                        <button type="submit" disabled={saving || !comment.trim()} className="btn-primary btn-sm">Post</button>
+                      </div>
+                    </form>
+                  </div>
+                )}
 
-              {tab === "activity" && (
-                <div className="space-y-3">
-                  {activity.length === 0 && (
-                    <p className="text-xs text-notion-muted text-center py-4">
-                      No activity yet
-                    </p>
-                  )}
-                  {activity.map((a, i) => (
-                    <div
-                      key={a._id}
-                      className="flex items-center gap-3 text-xs"
-                    >
-                      <div className="w-1.5 h-1.5 rounded-full bg-notion-accent shrink-0" />
-                      <Avatar name={a.performedBy?.name} size={5} />
-                      <span className="text-notion-text">
-                        {a.performedBy?.name}
-                      </span>
-                      <span className="text-notion-muted">
-                        {a.action.replace("_", " ")}
-                      </span>
-                      {a.metadata?.fields && (
-                        <span className="text-notion-muted">
-                          ({a.metadata.fields})
-                        </span>
-                      )}
-                      <span className="ml-auto text-notion-muted">
-                        {timeAgo(a.createdAt)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
+                {tab === "activity" && (
+                  <div className="space-y-3">
+                    {activity.length === 0 && <p className="text-xs text-notion-muted text-center py-4">No activity yet</p>}
+                    {activity.map((a) => (
+                      <div key={a._id} className="flex items-center gap-3 text-xs">
+                        <div className="w-1.5 h-1.5 rounded-full bg-notion-accent shrink-0" />
+                        <Avatar name={a.performedBy?.name} size={5} />
+                        <span className="text-notion-text">{a.performedBy?.name}</span>
+                        <span className="text-notion-muted">{a.action.replace("_", " ")}</span>
+                        {a.metadata?.fields && <span className="text-notion-muted">({a.metadata.fields})</span>}
+                        <span className="ml-auto text-notion-muted">{timeAgo(a.createdAt)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
-              {tab === "history" && (
-                <div className="space-y-3">
-                  {(!bug.history || bug.history.length === 0) && (
-                    <p className="text-xs text-notion-muted text-center py-4">
-                      No history yet
-                    </p>
-                  )}
-                  {(bug.history || []).map((h, i) => (
-                    <div
-                      key={i}
-                      className="text-xs bg-notion-bg/50 rounded-lg px-3 py-2 space-y-1"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-notion-text capitalize">
-                          {h.field}
-                        </span>
-                        <span className="text-notion-muted">changed by</span>
-                        <span className="text-notion-accent">
-                          {h.changedBy?.name || "Unknown"}
-                        </span>
-                        <span className="ml-auto text-notion-muted">
-                          {timeAgo(h.changedAt)}
-                        </span>
+                {tab === "history" && (
+                  <div className="space-y-3">
+                    {(!bug.history || bug.history.length === 0) && <p className="text-xs text-notion-muted text-center py-4">No history yet</p>}
+                    {(bug.history || []).map((h, i) => (
+                      <div key={i} className="text-xs bg-notion-bg/50 rounded-lg px-3 py-2 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-notion-text capitalize">{h.field}</span>
+                          <span className="text-notion-muted">changed by</span>
+                          <span className="text-notion-accent">{h.changedBy?.name || "Unknown"}</span>
+                          <span className="ml-auto text-notion-muted">{timeAgo(h.changedAt)}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-red-400 line-through">{String(h.oldValue)}</span>
+                          <svg className="w-3 h-3 text-notion-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg>
+                          <span className="text-emerald-400">{String(h.newValue)}</span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-red-400 line-through">
-                          {String(h.oldValue)}
-                        </span>
-                        <svg
-                          className="w-3 h-3 text-notion-muted"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M17 8l4 4m0 0l-4 4m4-4H3"
-                          />
-                        </svg>
-                        <span className="text-emerald-400">
-                          {String(h.newValue)}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Sidebar */}
           <div className="space-y-4">
             <div className="card space-y-4">
-              <h3 className="text-xs font-semibold text-notion-text uppercase tracking-wide">
-                Properties
-              </h3>
+              <h3 className="text-xs font-semibold text-notion-text uppercase tracking-wide">Properties</h3>
 
-              <div>
-                <label className="label">Status</label>
-                <select
-                  className="input"
-                  value={bug.status}
-                  onChange={(e) => handleUpdate("status", e.target.value)}
-                >
-                  {STATUSES.map((s) => (
-                    <option key={s}>{s}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="label">Priority</label>
-                <select
-                  className="input"
-                  value={bug.priority}
-                  onChange={(e) => handleUpdate("priority", e.target.value)}
-                >
-                  {PRIORITIES.map((p) => (
-                    <option key={p}>{p}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="label">Assigned To</label>
-                <p className="text-sm text-notion-text">
-                  {bug.assignedTo?.name || (
-                    <span className="text-notion-muted italic">Unassigned</span>
-                  )}
-                </p>
-              </div>
-              <div>
-                <label className="label">Project</label>
-                <p className="text-sm text-notion-text">{bug.project?.name}</p>
-              </div>
-              {bug.module && (
-                <div>
-                  <label className="label">Module</label>
-                  <p className="text-sm text-notion-text">{bug.module?.name}</p>
-                </div>
-              )}
-              {bug.feature && (
-                <div>
-                  <label className="label">Feature</label>
-                  <p className="text-sm text-notion-text">
-                    {bug.feature?.name}
-                  </p>
-                </div>
-              )}
-              {bug.tags?.length > 0 && (
-                <div>
-                  <label className="label">Tags</label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {bug.tags.map((t) => (
-                      <span
-                        key={t}
-                        className="badge bg-notion-hover text-notion-muted border border-notion-border"
-                      >
-                        {t}
-                      </span>
-                    ))}
+              {editing ? (
+                /* Edit mode sidebar */
+                <>
+                  <div>
+                    <label className="label">Priority</label>
+                    <div className="space-y-1.5">
+                      {PRIORITIES.map(p => (
+                        <label key={p} className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer transition-all ${editForm.priority === p ? "border-notion-accent bg-notion-accent/10" : "border-notion-border hover:border-notion-accent/40"}`}>
+                          <input type="radio" className="hidden" value={p} checked={editForm.priority === p} onChange={setEdit("priority")} />
+                          <span className="w-2 h-2 rounded-full" style={{ background: PRIORITY_COLORS[p] }} />
+                          <span className="text-xs text-notion-text">{p}</span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                  <div>
+                    <label className="label">Type</label>
+                    <select className="input" value={editForm.type} onChange={setEdit("type")}>
+                      {TYPES.map(t => <option key={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label">Status</label>
+                    <select className="input" value={editForm.status} onChange={setEdit("status")}>
+                      {STATUSES.map(s => <option key={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label">Assigned To</label>
+                    <select className="input" value={editForm.assignedTo} onChange={setEdit("assignedTo")}>
+                      <option value="">Unassigned</option>
+                      {users.map(u => <option key={u._id} value={u._id}>{u.name}</option>)}
+                    </select>
+                  </div>
+                  {modules.length > 0 && (
+                    <div>
+                      <label className="label">Module</label>
+                      <select className="input" value={editForm.module} onChange={handleModuleChange}>
+                        <option value="">None</option>
+                        {modules.map(m => <option key={m._id} value={m._id}>{m.name}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {features.length > 0 && (
+                    <div>
+                      <label className="label">Feature</label>
+                      <select className="input" value={editForm.feature} onChange={setEdit("feature")}>
+                        <option value="">None</option>
+                        {features.map(f => <option key={f._id} value={f._id}>{f.name}</option>)}
+                      </select>
+                    </div>
+                  )}
+                </>
+              ) : (
+                /* View mode sidebar */
+                <>
+                  <div>
+                    <label className="label">Status</label>
+                    <select className="input" value={bug.status} onChange={e => handleUpdate("status", e.target.value)}>
+                      {STATUSES.map(s => <option key={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label">Priority</label>
+                    <select className="input" value={bug.priority} onChange={e => handleUpdate("priority", e.target.value)}>
+                      {PRIORITIES.map(p => <option key={p}>{p}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label">Assigned To</label>
+                    <p className="text-sm text-notion-text">{bug.assignedTo?.name || <span className="text-notion-muted italic">Unassigned</span>}</p>
+                  </div>
+                  <div>
+                    <label className="label">Project</label>
+                    <p className="text-sm text-notion-text">{bug.project?.name}</p>
+                  </div>
+                  {bug.module && (
+                    <div>
+                      <label className="label">Module</label>
+                      <p className="text-sm text-notion-text">{bug.module?.name}</p>
+                    </div>
+                  )}
+                  {bug.feature && (
+                    <div>
+                      <label className="label">Feature</label>
+                      <p className="text-sm text-notion-text">{bug.feature?.name}</p>
+                    </div>
+                  )}
+                  {bug.tags?.length > 0 && (
+                    <div>
+                      <label className="label">Tags</label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {bug.tags.map(t => (
+                          <span key={t} className="badge bg-notion-hover text-notion-muted border border-notion-border">{t}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>

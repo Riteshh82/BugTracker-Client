@@ -119,7 +119,7 @@ export default function Profile() {
         </div>
 
         {/* Stats */}
-        <div className="card">
+        {/* <div className="card">
           <h3 className="text-sm font-semibold text-notion-text mb-4">
             Account Info
           </h3>
@@ -139,7 +139,7 @@ export default function Profile() {
               </p>
             </div>
           </div>
-        </div>
+        </div> */}
       </motion.div>
     </div>
   );
